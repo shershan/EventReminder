@@ -1,11 +1,17 @@
 using Arch.EntityFrameworkCore.UnitOfWork;
+using EventBuilder.Constants;
+using EventReminder.BLL;
 using EventReminder.DAL;
+using EventReminder.Models.Configuration;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.IdentityModel.Tokens;
+using System.Security.Claims;
+using System.Text;
 
 namespace EventReminder.API
 {
@@ -24,6 +30,8 @@ namespace EventReminder.API
         {
             services.AddSingleton<IConfiguration>(_configuration);
 
+            services.AddControllers();
+
             this.InitDI(services);
         }
 
@@ -37,19 +45,55 @@ namespace EventReminder.API
 
             app.UseRouting();
 
+            app.UseAuthentication();
+            app.UseAuthorization();
+
             app.UseEndpoints(endpoints =>
             {
-                endpoints.MapGet("/", async context =>
-                {
-                    await context.Response.WriteAsync("Hello World!");
-                });
+                endpoints.MapControllers();
             });
         }
 
         private IServiceCollection InitDI(IServiceCollection services)
         {
+            this.InitJwtTokenAuthentication(services);
+
             services.InitDal(_configuration);
 
+            this.InitUnitOfWork(services);
+
+            services.InitBll();
+
+            return services;
+        }
+
+        private IServiceCollection InitJwtTokenAuthentication(IServiceCollection services)
+        {
+            services
+                .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+                .AddJwtBearer(options =>
+                {
+                    var jwtSettings = new JwtSettings();
+                    _configuration.GetSection(ConfigurationConstants.JwtSectionName).Bind(jwtSettings);
+
+                    options.TokenValidationParameters = new TokenValidationParameters
+                    {
+                        ValidateIssuer = true,
+                        ValidateAudience = true,
+                        ValidateLifetime = true,
+                        ValidateIssuerSigningKey = true,
+                        ValidIssuer = jwtSettings.Issuer,
+                        ValidAudience = jwtSettings.Audience,
+                        NameClaimType = ClaimTypes.Email,
+                        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSettings.SigningKey))
+                    };
+                });
+
+            return services;
+        }
+
+        private IServiceCollection InitUnitOfWork(IServiceCollection services)
+        {
             services
                 .AddDbContext<EventNotificationDbContext>()
                 .AddUnitOfWork<EventNotificationDbContext>();
